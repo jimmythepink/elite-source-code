@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cobra Mk III - glossy panel prototype</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #04040c; color: #9ab; font: 13px monospace; }
+  canvas { display: block; margin: 0 auto; background: radial-gradient(circle at 50% 40%, #12122a, #04040c 70%); }
+  #hud { text-align: center; padding: 6px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="900" height="560"></canvas>
+<div id="hud">Cobra Mk III (geometry from elite-source.asm) &ndash; drag to rotate, wheel to zoom, space to pause</div>
+<script>
+const SHIP = {"vertices": [[32, 0, 76], [-32, 0, 76], [0, 26, 24], [-120, -3, -8], [120, -3, -8], [-88, 16, -40], [88, 16, -40], [128, -8, -40], [-128, -8, -40], [0, 26, -40], [-32, -24, -40], [32, -24, -40], [-36, 8, -40], [-8, 12, -40], [8, 12, -40], [36, 8, -40], [36, -12, -40], [8, -16, -40], [-8, -16, -40], [-36, -12, -40], [0, 0, 76], [0, 0, 90], [-80, -6, -40], [-80, 6, -40], [-88, 0, -40], [80, 6, -40], [88, 0, -40], [80, -6, -40]], "faces": [{"normal": [0, 62, 31], "loops": [[0, 1, 2]]}, {"normal": [-18, 55, 16], "loops": [[1, 2, 5]]}, {"normal": [18, 55, 16], "loops": [[0, 2, 6]]}, {"normal": [-16, 52, 14], "loops": [[1, 3, 5]]}, {"normal": [16, 52, 14], "loops": [[0, 4, 6]]}, {"normal": [-14, 47, 0], "loops": [[2, 5, 9]]}, {"normal": [14, 47, 0], "loops": [[2, 6, 9]]}, {"normal": [-61, 102, 0], "loops": [[3, 8, 5]]}, {"normal": [61, 102, 0], "loops": [[4, 7, 6]]}, {"normal": [0, 0, -80], "loops": [[5, 9, 6, 7, 11, 10, 8]]}, {"normal": [-7, -42, 9], "loops": [[1, 3, 8, 10]]}, {"normal": [0, -30, 6], "loops": [[0, 1, 10, 11]]}, {"normal": [7, -42, 9], "loops": [[0, 4, 7, 11]]}], "details": [[12, 13, 9], [18, 19, 9], [14, 15, 9], [16, 17, 9], [15, 16, 9], [14, 17, 9], [13, 18, 9], [12, 19, 9], [22, 24, 9], [23, 24, 9], [22, 23, 9], [25, 26, 9], [26, 27, 9], [25, 27, 9]]};
+
+// One base hue per face group: canopy/top, wings, rear, belly
+const FACE_HUE = [
+  190, 200, 200, 215, 215, 175, 175, 320, 320, 235, 275, 285, 275
+];
+const FACE_SAT = [90, 90, 90, 85, 85, 85, 85, 95, 95, 25, 80, 80, 80];
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const W = canvas.width, H = canvas.height;
+const q = new URLSearchParams(location.search);
+let yaw = +(q.get('yaw') ?? -0.6), pitch = +(q.get('pitch') ?? 0.35), zoom = 2.3, spinning = !q.has('yaw');
+
+const LIGHT = norm([-0.5, 0.8, 0.6]);
+
+function norm(v) { const l = Math.hypot(...v) || 1; return v.map(x => x / l); }
+function dot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+function rot(p) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const x = p[0]*cy + p[2]*sy, z = -p[0]*sy + p[2]*cy;
+  return [x, p[1]*cp - z*sp, p[1]*sp + z*cp];
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  const cam = 600;
+  const project = p => {
+    const k = cam / (cam - p[2] * zoom);
+    return [W / 2 + p[0] * zoom * k, H / 2 - p[1] * zoom * k];
+  };
+  const verts = SHIP.vertices.map(rot);
+  const pts = verts.map(project);
+
+  const visible = [];
+  SHIP.faces.forEach((f, i) => {
+    if (!f.loops.length) return;
+    const n = norm(rot(f.normal));
+    const v = verts[f.loops[0][0]];
+    const toCam = [-v[0], -v[1], cam / zoom - v[2]];
+    if (dot(n, toCam) <= 0) return;
+    const depth = f.loops[0].reduce((s, vi) => s + verts[vi][2], 0) / f.loops[0].length;
+    visible.push({ i, f, n, depth });
+  });
+  visible.sort((a, b) => a.depth - b.depth);
+
+  // ground shadow
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.filter = "blur(14px)";
+  ctx.beginPath();
+  ctx.ellipse(W / 2, H - 70, 170 * zoom / 2.3, 22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  for (const { i, f, n } of visible) {
+    const hue = FACE_HUE[i], sat = FACE_SAT[i];
+    const diffuse = Math.max(0, dot(n, LIGHT));
+    const light = 22 + diffuse * 40;
+    const loop = f.loops[0].map(vi => pts[vi]);
+
+    const path = () => {
+      ctx.beginPath();
+      loop.forEach((p, k) => (k ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+      ctx.closePath();
+    };
+    const xs = loop.map(p => p[0]), ys = loop.map(p => p[1]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const r = Math.max(maxX - minX, maxY - minY) / 2 + 1;
+
+    ctx.save();
+    path();
+    // base: vertical gradient gives a lacquered, curved look
+    const g = ctx.createLinearGradient(cx, minY, cx, maxY);
+    g.addColorStop(0, `hsl(${hue} ${sat}% ${Math.min(80, light + 14)}%)`);
+    g.addColorStop(0.5, `hsl(${hue} ${sat}% ${light}%)`);
+    g.addColorStop(1, `hsl(${hue + 12} ${sat}% ${Math.max(6, light - 16)}%)`);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.clip();
+
+    // glossy specular blob, offset toward the light and scaled by facing
+    const spec = Math.pow(diffuse, 6);
+    const h = [n[0] * 0 + LIGHT[0], LIGHT[1]];
+    const hx = cx + h[0] * r * 0.45, hy = cy - h[1] * r * 0.45;
+    const sg = ctx.createRadialGradient(hx, hy, 0, hx, hy, r * 0.9);
+    sg.addColorStop(0, `rgba(255,255,255,${0.15 + spec * 0.7})`);
+    sg.addColorStop(0.35, `rgba(255,255,255,${0.05 + spec * 0.2})`);
+    sg.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = sg;
+    ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+
+    // upper-half "window" sheen
+    ctx.beginPath();
+    ctx.moveTo(minX, minY);
+    ctx.lineTo(maxX, minY);
+    ctx.lineTo(maxX, cy - (maxY - minY) * 0.08);
+    ctx.quadraticCurveTo(cx, cy + (maxY - minY) * 0.12, minX, cy - (maxY - minY) * 0.08);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fill();
+    ctx.restore();
+
+    // bevelled panel edge: bright rim then dark seam
+    path();
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = `hsla(${hue} ${sat}% 12% / 0.9)`;
+    ctx.stroke();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = `hsla(${hue} ${Math.max(20, sat - 30)}% ${Math.min(92, light + 38)}% / 0.9)`;
+    ctx.stroke();
+
+    // engine nozzles and other detail lines sitting on this face
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = "rgba(255,220,140,0.9)";
+    for (const [a, b, fi] of SHIP.details) {
+      if (fi !== i) continue;
+      ctx.beginPath();
+      ctx.moveTo(pts[a][0], pts[a][1]);
+      ctx.lineTo(pts[b][0], pts[b][1]);
+      ctx.stroke();
+    }
+  }
+}
+
+let last = 0;
+function frame(t) {
+  if (spinning) yaw += (t - last) * 0.0006;
+  last = t;
+  render();
+  requestAnimationFrame(frame);
+}
+
+let drag = null;
+canvas.addEventListener("pointerdown", e => { drag = [e.clientX, e.clientY]; spinning = false; });
+addEventListener("pointerup", () => (drag = null));
+addEventListener("pointermove", e => {
+  if (!drag) return;
+  yaw += (e.clientX - drag[0]) * 0.01;
+  pitch = Math.max(-1.4, Math.min(1.4, pitch + (e.clientY - drag[1]) * 0.01));
+  drag = [e.clientX, e.clientY];
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  zoom = Math.max(1, Math.min(5, zoom * (e.deltaY < 0 ? 1.08 : 0.93)));
+}, { passive: false });
+addEventListener("keydown", e => { if (e.code === "Space") spinning = !spinning; });
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
