@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elite (BBC Micro) - source code build</title>
+<style>
+  body { margin: 0; background: #000; color: #ccc; font: 14px monospace; text-align: center; }
+  iframe { width: 100%; height: calc(100vh - 60px); border: 0; }
+  a { color: #8cf; }
+</style>
+</head>
+<body>
+<iframe id="emu" allow="autoplay; fullscreen; gamepad"></iframe>
+<div style="padding:8px">
+  Runs in <a href="https://bbc.xania.org/">jsbeeb</a> &middot;
+  <a href="elite-cassette-sth.ssd">disc image</a> &middot;
+  <a href="cobra/">Cobra Mk III prototype</a> &middot;
+  <a href="https://github.com/jimmythepink/elite-source-code">source</a>
+</div>
+<script>
+  const disc = new URL("elite-cassette-sth.ssd", location.href).href;
+  document.getElementById("emu").src =
+    "https://bbc.xania.org/?model=B&autoboot&disc1=" + encodeURIComponent(disc);
+</script>
+</body>
+</html>
